@@ -1,7 +1,9 @@
 #include <cstdio>
 #define clear() printf("\033[H\033[J")
 #define gotoxy(x,y) printf("\033[%d;%dH", (y), (x))
-
+#include <cmath>
+#include <algorithm>
+#include "space.hpp"
 
 class Color{
     // This class will represent color in various color schemes.
@@ -62,12 +64,18 @@ class Color{
         // This is for ascii matching
         char getLetter(){
 
-            char pallete[] = " .:-=+*#%@";
+            int pallete_no = 4;
+            char pallete[pallete_no];
+            pallete[0] = ' ';
+            pallete[1] = 'o';
+            pallete[2] = '0';
+            pallete[3] = '@';
 
             // Pick different letter according to value
             double v = getValue();
-            v*= 9;
+            v*= pallete_no-1;
             return pallete[(int)v];
+            
 
         }
 
@@ -125,28 +133,54 @@ class Pixel{
 };
 
 // Drawing helper functions
-int * bresenham(int lengthx,int heighty){
-    // This returns the offset for every x value in the [0,lengthx] space
-    // Setting the arguments accordingly you can get any info you need on drawing lines.
-    // Just don't forget to add the offset of your segment each time.
-    // The range [0,lengthx] is inclusive so you get lengthx+1 values.
-    // This also needs memory cleaning afterward
+int * bresenham(int lengthx,int heighty,int xstart = 0, int ystart = 0, int order = 0){
+    // This will perform bresenham and return the points on the line [x1, y1, x2, y2, ...]
+    // Assumes that abs(lengthx) is greater than abs(lengthy)
+    
+    // Find the signs for correct iteration
+    int signx = 1-2*(lengthx<0);
+    int signy = 1-2*(heighty<0);
+    lengthx *= signx;
+    heighty *= signy;
 
-    int * res = new int[lengthx+1];
+    int * res = new int[2*(lengthx+1)];
     int e = -(lengthx>>1);
-    int xx = 0, yy = 0;
+    int xx = xstart, yy = ystart;
     for(int i = 0; i <= lengthx; i++){
-        res[i] = yy;
-        xx++;
+        res[2*i+order] = xx;
+        res[2*i+1-order] = yy;
+        xx+=signx;
         e += heighty;
         if (e >= 0){
-            yy++;
+            yy+=signy;
             e -= lengthx;
         }
     }
 
     return res;
 
+}
+
+int * bresenham_line(int x1, int y1, int x2, int y2, int &length){
+    // This specific function will produce all the points on the
+    // specified line using the bresenham method.
+    // The points are then saved on an array in the form [x1,y1,x2,y2,x3,y3 ...]
+    // This function is very useful not only for drawing lines, but figuring out points
+    // for more complex shapes (e.g. triangles)
+
+    // Calculate the initial variables to find which case applies
+    int dx = x2-x1, dy = y2-y1;
+
+    // Check which of the two you need to iterate
+    if (abs(dx) >= abs(dy)){
+        // Iterating x
+        length = abs(dx)+1;
+        return bresenham(dx,dy,x1,y1);
+    }else{
+        // Iterating y
+        length = abs(dy)+1;
+        return bresenham(dy,dx,y1,x1,1);
+    }
 
 }
 
@@ -164,8 +198,9 @@ class Canvas{
         bool framerendered = false;
 
         // Variables for antialaising
-        int aa_factor = 3;
+        int aa_factor = 1;
         Color * tempcolor;
+        static Color * drawcolor;
 
 
         // Private drawing functions to help with the public ones
@@ -179,7 +214,42 @@ class Canvas{
             draw_point_aa(xo-yy,yo+xx,c);
             draw_point_aa(xo+yy,yo-xx,c);
             draw_point_aa(xo-yy,yo-xx,c);
+        }
 
+        // Draws a point with subvalues for the color on the sides to achieve anti-alising
+        // This is only used by the draw methods and not by users
+        void draw_point_aa(int x, int y, Color * c){
+
+            // New draw point aa draws a whole pixel, offseted
+            for(int i = 0; i < aa_factor; i++){
+                for(int j = 0; j < aa_factor; j++){
+                    draw_point(x+i,y+j,c);
+                }
+            }
+
+            /*
+            for(int i = -aa_factor/2; i < aa_factor/2+1; i++){
+                for(int j = -aa_factor/2; j < aa_factor/2+1; j++){
+                    delete tempcolor;
+                    double factor = aa_factor-abs(i)+abs(j);
+                    tempcolor = new Color(c->getRed()*factor,c->getGreen()*factor,c->getBlue()*factor);
+                    draw_point(x+i,y+j,tempcolor);
+                }
+            }*/
+        }
+
+        // This function will draw a subpixel on the surface (subpixels are the same as pixels when aa_factor is set to 1)
+        void draw_point(int x, int y,Color * c){
+            // Checks that the point is within the rectangle before drawing
+            if(x < 0 || x >= width*aa_factor || y < 0 || y >= height*aa_factor)
+                return;
+
+            // Draw the point in the specific color
+            Color * old = surf[x][y]->getColor();
+            if(!old->equals(c)){
+                old->paste(c);
+                buffer[x/aa_factor][y/aa_factor] = false;
+            }
         }
 
 
@@ -188,40 +258,52 @@ class Canvas{
         Canvas(int w, int h){
             // Creates a new canvas of set dimensions
 
-            // Create the array and fill it with pixels
+            // Set the variables for width and height
             width = w;
             height = h;
-            surf = new Pixel**[width*aa_factor];
-            buffer = new bool*[width];
-            for(int i = 0; i < width*aa_factor; i++){
-                surf[i] = new Pixel*[height*aa_factor];
-                if(i < width)
-                    buffer[i] = new bool[height];
-                for(int j = 0; j < height*aa_factor; j++){
+
+            // Create the surface array and fill it with pixels
+            // Note that the surface array should be size * aa_factor, to achieve the supersampling
+            surf = new Pixel**[w*aa_factor];
+            for(int i = 0; i < w*aa_factor; i++){
+                surf[i] = new Pixel*[h*aa_factor];
+                for(int j = 0; j < h*aa_factor; j++)
                     surf[i][j] = new Pixel();
-                    if(i < width && j < height)
-                        buffer[i][j] = false;
-                }
             }
 
-            // Create tempcolor for calculations
+            // Do the same for the buffer array
+            // The buffer array does not need to be larger than the canvas
+            buffer = new bool*[w];
+            for(int i = 0; i < w; i++){
+                buffer[i] = new bool[h];
+                for(int j = 0; j < h; j++)
+                    buffer[i][j] = false;
+            }
+
+            // Create tempcolor for calculations and the drawing color
             tempcolor = new Color(0,0,0);
+            if(!drawcolor) drawcolor = new Color(1,1,1);
 
         }
 
         ~Canvas(){
 
-            // Delete all the allocated memory
-            for(int i = 0; i < width*aa_factor; i++){
-                for(int j = 0; j < height*aa_factor; j++)
+            // Delete the surface
+            for(int i = 0; i < width; i++){
+                for(int j = 0; j < height; j++){
                     delete surf[i][j];
+                }
                 delete[] surf[i];
-                if(i < width)
-                    delete[] buffer[i];
             }
             delete[] surf;
+
+            // Delete the buffer array
+            for(int i = 0; i < width; i++){
+                delete[] buffer[i];
+            }
             delete[] buffer;
 
+            // Delete the temporary color
             delete tempcolor;
 
         }
@@ -251,15 +333,8 @@ class Canvas{
             return tempcolor;
         }
 
-        // Clean out the canvas with one color only
-        void flood(Color * c){
 
-            for(int i = 0; i < width*aa_factor; i++){
-                for(int j = 0; j < height*aa_factor; j++)
-                    draw_point(i,j,c);
-            }
-
-        }
+        
 
         // Functions for rendering on the screen
         void render(){
@@ -296,83 +371,68 @@ class Canvas{
 
         }
 
+        // Clean out the canvas with one color only
+        void draw_clear(Color * c = drawcolor){
 
-        // Functions for drawing on the pixel
-        void draw_point(int x, int y,Color * c){
-
-            // Checks that the point is within the rectangle before drawing
-            if(x < 0 || x >= width*aa_factor || y < 0 || y >= height*aa_factor)
-                return;
-
-            // Draw the point in the specific color
-            Color * old = surf[x][y]->getColor();
-            if(!old->equals(c)){
-                old->paste(c);
-                buffer[x/aa_factor][y/aa_factor] = false;
+            for(int i = 0; i < width*aa_factor; i++){
+                for(int j = 0; j < height*aa_factor; j++)
+                    draw_point(i,j,c);
             }
+        }
+
+        // This function is different from draw_point because it will fill a single pixel on any aa_factor
+        void draw_pixel(int x, int y, Color * c = drawcolor){
+            
+            // Scale the coords according to aa
+            x *= aa_factor;
+            y *= aa_factor;
+
+            // Draw all the subpixels of the pixel
+            for(int i = 0; i < aa_factor; i++)
+                for(int j = 0; j < aa_factor; j++)
+                    draw_point(x+i,y+j,c);
 
         }
 
-        void draw_point_aa(int x, int y, Color * c){
+        void draw_line(int x1,int y1, int x2, int y2,bool use_aa = false, Color * c = drawcolor){
+            // This is done using the bresenham line method, see above
 
+            // Perform the antialaising correction
+            if(use_aa){
+                x1 *= aa_factor;
+                x2 *= aa_factor;
+                y1 *= aa_factor;
+                y2 *= aa_factor;
+            }
+
+            // Find the length of the result
+            int res_len;
             
+            // Call bresenham line for the points
+            int * res = bresenham_line(x1,y1,x2,y2,res_len);
 
-            for(int i = -aa_factor/2; i < aa_factor/2+1; i++){
-                for(int j = -aa_factor/2; j < aa_factor/2+1; j++){
-                    delete tempcolor;
-                    double factor = aa_factor-abs(i)+abs(j);
-                    tempcolor = new Color(c->getRed()*factor,c->getGreen()*factor,c->getBlue()*factor);
-                    draw_point(x+i,y+j,tempcolor);
+            // Draw all the points of the line
+            if(use_aa){
+                for(int i = 0; i < res_len; i++){
+                    draw_point_aa(res[2*i],res[2*i+1],c);
+                }
+            }else{
+                for(int i = 0; i < res_len; i++){
+                    draw_pixel(res[2*i],res[2*i+1],c);
                 }
             }
 
-
-        }
-
-        void draw_line(int x1,int y1, int x2, int y2, Color * c){
-            // This will perform all the 8 cases of the line drawing and draw using bresenham's method
-
-            // Perform the antialaising correction
-            x1 *= aa_factor;
-            x2 *= aa_factor;
-            y1 *= aa_factor;
-            y2 *= aa_factor;
-
-            // Find the actual differences
-            int dx = x2-x1, dy = y2-y1;
-            int signx = 1-2*(dx<0), signy = 1-2*(dy<0);
-            dx *= signx;
-            dy *= signy;
-
-            // Find out which is getting iterated
-            bool iteratex = dx >= dy;
-            int iter = (iteratex)?dx:dy;
-            int signiter = (iteratex)?signx:signy;
-            int signnoniter = (iteratex)?signy:signx;
-            int iter1 = (iteratex)?x1:y1;
-            int noniter1 = (iteratex)?y1:x1;
-
-            // Calcuate the bresenham
-            int * res = bresenham(iter,(iteratex)?dy:dx);
-
-            int xx,yy;
-            for(int i = 0; i < iter+1; i++){
-                
-                (iteratex?xx:yy) = iter1+i*signiter;
-                (iteratex?yy:xx) = noniter1+signnoniter*res[i];
-                draw_point(xx,yy,c);
-
-            }
-
+            // Delete the result after drawing
             delete[] res;
 
         }
 
-        void draw_circle(double xc,double yc, double r,Color * c){
+        void draw_circle(double xc,double yc, double r,Color * c = drawcolor){
 
             xc *= aa_factor;
             yc *= aa_factor;
             r *= aa_factor;
+
             // Draws a circle around (xc,yc) with radius = r
             // This is using a modified bresenham
             int xx = 0, yy = r, e = -r;
@@ -388,4 +448,99 @@ class Canvas{
 
         }
 
+        void draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3, Color * c = drawcolor){
+            // Draws the triangle using bresenham (fast and reliable)
+
+            // Scale the triangle for aa
+            x1 *= aa_factor;
+            y1 *= aa_factor;
+            x2 *= aa_factor;
+            y2 *= aa_factor;
+            x3 *= aa_factor;
+            y3 *= aa_factor;
+
+
+            //Check which point is in the middle (height wise)
+            int miny = std::min(std::min(y1,y2),y3), maxy = std::max(std::max(y1,y2),y3);
+            int ex1, ey1, ex2, ey2; // Edge points
+            int mx, my; // Middle point
+            if(y2 == miny && y3 == maxy || y3 == miny && y2 == maxy){
+                // point 1 in the middle
+                mx = x1; my = y1;
+                ex1 = x2; ey1 = y2; ex2 = x3; ey2 = y3;
+            }else if(y1 == miny && y3 == maxy || y3 == miny && y1 == maxy){
+                // point2 in the middle
+                mx = x2; my = y2;
+                ex1 = x1; ey1 = y1; ex2 = x3; ey2 = y3;
+            }else{
+                //Point three in the middle
+                mx = x3; my = y3;
+                ex1 = x1; ey1 = y1; ex2 = x2; ey2 = y2;
+            }
+
+            // Now that we have the middle points, we can bresenham the two distances
+            int rb_len, r1_len, r2_len;
+            int * resbig = bresenham_line(ex1,ey1,ex2,ey2,rb_len);
+            int * res1small = bresenham_line(ex1,ey1,mx,my,r1_len);
+            int * res2small = bresenham_line(mx,my,ex2,ey2,r2_len);
+            int * ressmall = res1small;
+            int rs_len = r1_len;
+            int i = 0, j = 0;
+            int lasty = -10;
+            bool changed = false;
+
+            for(int i = 0; i < rb_len; i++){
+                
+                //Find the y on the big line
+                int by = resbig[2*i+1];
+                int bx = resbig[2*i];
+
+                //If it is the same as last y then just draw the extra point
+                if(by == lasty){
+                    draw_point(bx,by,c);
+                    continue;
+                }
+                lasty = by;
+
+                // Then find the coords on the small line
+                int sx = ressmall[2*j];
+                int sy = ressmall[2*j+1];
+
+                // Draw the inbetween points
+                for(int xx = std::min(sx,bx); xx <= std::max(sx,bx); xx++)
+                    draw_point(xx,by,c);
+
+                // Finally, iterate the small line until a change in y (draw the points as you go)
+                while(sy == lasty){
+                    if(j == rs_len-1){
+                        //Change the line
+                        if(changed) break;
+                        ressmall = res2small;
+                        rs_len = r2_len;
+                        j = 0;
+                        changed = true;
+                    }
+                    j++;
+                    sx = ressmall[2*j];
+                    sy = ressmall[2*j+1];
+                    draw_point(sx,sy,c);
+                }
+            }
+
+        }
+
+        void draw_triangle(Triangle *tri, Color * c){
+            // Draws a triangle set by the space file. Rounds coordinates to the best approximate pixel
+            
+            // Get each coordinate from the points of the Triangle
+            double x1 = tri->getPoint(0)->getX(), y1 = tri->getPoint(0)->getY();
+            double x2 = tri->getPoint(1)->getX(), y2 = tri->getPoint(1)->getY();
+            double x3 = tri->getPoint(2)->getX(), y3 = tri->getPoint(2)->getY();
+
+            // Call the function above
+            draw_triangle((int)x1,(int)y1,(int)x2,(int)y2,(int)x3,(int)y3,c);
+
+        }
+
 };
+
