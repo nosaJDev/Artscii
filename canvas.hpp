@@ -451,6 +451,13 @@ class Canvas{
         void draw_triangle(int x1, int y1, int x2, int y2, int x3, int y3, Color * c = drawcolor){
             // Draws the triangle using bresenham (fast and reliable)
 
+            //Pypass to test things
+            draw_line(x1,y1,x2,y2,c);
+            draw_line(x2,y2,x3,y3,c);
+            draw_line(x3,y3,x1,y1,c);
+            return;
+
+
             // Scale the triangle for aa
             x1 *= aa_factor;
             y1 *= aa_factor;
@@ -541,6 +548,15 @@ class Canvas{
             draw_triangle((int)x1,(int)y1,(int)x2,(int)y2,(int)x3,(int)y3,c);
 
         }
+
+        void draw_cube(Cube * cube, Color * c){
+
+            // Draw all the triangles of the cube
+            for(int i = 0; i < 12; i++)
+                draw_triangle(cube->getTriangle(i),c);
+
+        }
+
 
 };
 

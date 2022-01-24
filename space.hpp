@@ -369,7 +369,7 @@ class Point{
 
             // Then divide with the homogenous coord
             for(int i = 0; i < 3; i++)
-                coords->set(i,i,coords->get(i,i)/coords->get(3,0));
+                coords->set(i,0,coords->get(i,0)/coords->get(3,0));
             coords->set(3,0,1.0);
 
         }
@@ -478,15 +478,82 @@ Transform * transform_view_per(Point * viewpoint, Point * viewdirection, double 
     // Then set the direction to be looking at -z
     double theta = viewdirection->getTheta();
     double phi = viewdirection->getPhi();
+    //printf("phi = %lf\n",phi);
     trans->add(matrix_rot_axis(-phi,2));
-    trans->add(matrix_rot_axis(-M_PI-theta,1));
-    trans->add(matrix_rot_axis(M_PI/2,0));
+    trans->add(matrix_rot_axis(M_PI-theta,1));
+    trans->add(matrix_rot_axis(-M_PI/2.0,2));
 
     // Finally apply the perspective projection matrix
     trans->add(matrix_per(d));
     return trans;
 
 }
+
+
+//Some other shapes for testing
+class Cube{
+    // This is a cube defined by two points. It consists of triangles.
+
+    private:
+
+        Triangle * triangles[12];
+
+    public:
+
+        Cube(Point * p1, Point * p2){
+
+            // Find all the given coordinates
+            double x1 = p1->getX();
+            double y1 = p1->getY();
+            double z1 = p1->getZ();
+            double x2 = p2->getX();
+            double y2 = p2->getY();
+            double z2 = p2->getZ();
+
+            // Set all the triangles according to the points
+            triangles[0] = new Triangle(new Point(x1,y1,z1),new Point(x1,y1,z2),new Point(x2,y1,z1));
+            triangles[1] = new Triangle(new Point(x1,y1,z2),new Point(x2,y1,z2),new Point(x2,y1,z1));
+            triangles[2] = new Triangle(new Point(x1,y2,z1),new Point(x1,y2,z2),new Point(x2,y2,z1));
+            triangles[3] = new Triangle(new Point(x1,y2,z2),new Point(x2,y2,z2),new Point(x2,y2,z1));
+
+            triangles[4] = new Triangle(new Point(x1,y1,z1),new Point(x1,y1,z2),new Point(x1,y2,z1));
+            triangles[5] = new Triangle(new Point(x1,y1,z2),new Point(x1,y2,z2),new Point(x1,y2,z1));
+            triangles[6] = new Triangle(new Point(x2,y1,z1),new Point(x2,y1,z2),new Point(x2,y2,z1));
+            triangles[7] = new Triangle(new Point(x2,y1,z2),new Point(x2,y2,z2),new Point(x2,y2,z1));
+
+            triangles[8] = new Triangle(new Point(x1,y1,z2),new Point(x1,y2,z2),new Point(x2,y2,z2));
+            triangles[9] = new Triangle(new Point(x1,y1,z2),new Point(x2,y2,z2),new Point(x1,y2,z2));
+            triangles[10] = new Triangle(new Point(x1,y1,z1),new Point(x1,y2,z1),new Point(x2,y2,z1));
+            triangles[11] = new Triangle(new Point(x1,y1,z1),new Point(x2,y2,z1),new Point(x1,y2,z1));
+
+
+        }
+
+        ~Cube(){
+
+            // Delete all the triangles
+            for(int i = 0; i < 12; i++)
+                delete triangles[i];
+
+        }
+
+        // Get a specific triangle
+        Triangle * getTriangle(int i){
+            return triangles[i];
+        }
+
+        // Transform the cube
+        void transform(Transform * trans){
+
+            // Apply the transform to the triangles
+            for(int i = 0; i < 12; i++)
+                triangles[i]->transform(trans);
+
+        }
+
+
+
+};
 
 
 
